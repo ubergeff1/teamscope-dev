@@ -1,0 +1,3 @@
+teamscope-dev-frontend:latest a10a2f5be2c8 94.5MB
+teamscope-dev-api:latest 4e1e72124ee9 869MB
+teamscope-dev-worker:latest 75b3d5739e4b 517MB
