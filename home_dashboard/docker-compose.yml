@@ -1,0 +1,47 @@
+services:
+  # ─── Homarr Dashboard ──��─────────────────────────��──────────────────
+  homarr:
+    image: ghcr.io/ajnart/homarr:latest
+    container_name: home-dashboard
+    restart: unless-stopped
+    environment:
+      - DEFAULT_COLOR_SCHEME=dark
+    ports:
+      - "8080:7575"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - homarr_config:/app/data/configs
+      - homarr_icons:/app/public/icons
+      - homarr_data:/data
+
+  # ─── Glances (System Monitor) ��────────────��────────────────────────
+  glances:
+    image: nicolargo/glances:latest-full
+    container_name: home-dashboard-glances
+    restart: unless-stopped
+    pid: host
+    privileged: true
+    ports:
+      - "61208:61208"
+    environment:
+      - GLANCES_OPT=-w
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /etc/os-release:/etc/os-release:ro
+
+  # ─── Uptime Kuma (Service Monitoring) ───────���──────────────────────
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    container_name: home-dashboard-uptime
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    volumes:
+      - uptime_data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+volumes:
+  homarr_config:
+  homarr_icons:
+  homarr_data:
+  uptime_data:

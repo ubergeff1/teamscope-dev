@@ -1,0 +1,10 @@
+services:
+  obsidian:
+    build: .
+    container_name: obsidian
+    ports:
+      - "8082:6080"
+    volumes:
+      - /home/coder/workspace/vault:/vault
+    restart: unless-stopped
+    shm_size: "1gb"

@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "appflowy": {
+      "command": "node",
+      "args": ["/home/coder/workspace/appflowy/mcp-server/server.mjs"],
+      "env": {
+        "APPFLOWY_URL": "http://192.168.110.223:8085",
+        "APPFLOWY_EMAIL": "jeff@teamscope.local",
+        "APPFLOWY_PASSWORD": "Admin123!"
+      }
+    }
+  }
+}

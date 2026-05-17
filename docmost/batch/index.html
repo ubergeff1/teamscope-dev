@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>DocMost - Batch Manager</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #1a1b1e; color: #c1c2c5; padding: 24px; }
+  h1 { font-size: 22px; margin-bottom: 8px; color: #fff; }
+  .subtitle { color: #909296; margin-bottom: 24px; font-size: 14px; }
+  .toolbar { display: flex; gap: 10px; margin-bottom: 16px; align-items: center; flex-wrap: wrap; }
+  input[type="text"] { padding: 8px 12px; border-radius: 4px; border: 1px solid #373A40; background: #25262b; color: #c1c2c5; font-size: 14px; width: 250px; }
+  select { padding: 8px 12px; border-radius: 4px; border: 1px solid #373A40; background: #25262b; color: #c1c2c5; font-size: 14px; }
+  button { padding: 8px 16px; border-radius: 4px; border: none; cursor: pointer; font-size: 13px; font-weight: 500; }
+  .btn-danger { background: #e03131; color: white; }
+  .btn-danger:hover { background: #c92a2a; }
+  .btn-secondary { background: #373A40; color: #c1c2c5; }
+  .btn-secondary:hover { background: #4a4e57; }
+  .btn-back { background: transparent; color: #4c6ef5; border: 1px solid #4c6ef5; text-decoration: none; display: inline-block; padding: 8px 16px; border-radius: 4px; font-size: 13px; }
+  .btn-back:hover { background: #4c6ef5; color: white; }
+  .count { color: #909296; font-size: 13px; }
+  #select-info { margin-left: auto; font-size: 13px; color: #4c6ef5; font-weight: 500; }
+
+  .tree { margin-top: 12px; }
+  .tree-node { display: flex; align-items: center; padding: 6px 8px; border-radius: 4px; cursor: pointer; }
+  .tree-node:hover { background: #25262b; }
+  .tree-node.selected { background: rgba(76, 110, 245, 0.15); }
+  .tree-node .cb { width: 16px; height: 16px; accent-color: #4c6ef5; cursor: pointer; margin-right: 8px; flex-shrink: 0; }
+  .tree-node .title { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tree-node .arrow { width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; color: #666; font-size: 10px; flex-shrink: 0; margin-right: 4px; transition: transform 0.15s; }
+  .tree-node .arrow.expanded { transform: rotate(90deg); }
+  .tree-node .arrow.empty { visibility: hidden; }
+  .tree-children { padding-left: 24px; }
+  .tree-children.collapsed { display: none; }
+  .page-icon { margin-right: 6px; font-size: 16px; }
+</style>
+</head>
+<body>
+<div style="display:flex;align-items:center;gap:16px;margin-bottom:24px;">
+  <a href="http://192.168.110.223:3000" class="btn-back">&larr; Back to DocMost</a>
+  <div>
+    <h1>Batch Page Manager</h1>
+    <div class="subtitle">Select pages to delete or manage in bulk</div>
+  </div>
+</div>
+
+<div class="toolbar">
+  <select id="space-select" onchange="loadTree()"></select>
+  <input type="text" id="filter" placeholder="Filter pages..." oninput="filterTree()">
+  <button class="btn-secondary" onclick="selectAll()">Select All</button>
+  <button class="btn-secondary" onclick="selectNone()">Select None</button>
+  <button class="btn-danger" onclick="deleteSelected()">Delete Selected</button>
+  <span id="select-info">0 selected</span>
+  <span class="count" id="total-count"></span>
+</div>
+
+<div id="tree-wrap">
+  <div style="padding:16px;text-align:center;color:#909296;">Loading...</div>
+</div>
+
+<script>
+var TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwMTllMzIxNi1lNTlmLTcxYTYtYjkzMy1hMzgwOTA0MTVlNjkiLCJhcGlLZXlJZCI6IjAxOWUzMjUxLWVhZmItNzc5Ni1iODJhLWE3ODhjMjA0ZmQyZCIsIndvcmtzcGFjZUlkIjoiMDE5ZTMyMTYtZTVhYS03MjNkLWExZDAtMzJlOTI0NTgyODZlIiwidHlwZSI6ImFwaV9rZXkiLCJpYXQiOjE3Nzg5NjA2ODksImV4cCI6MTgxMDQ5NjY4OCwiaXNzIjoiRG9jbW9zdCJ9.EltL74Q71LBOr-Xe0_ulKStVRuELj54XV8tYteF2-NU";
+
+var selected = new Set();
+var allNodes = []; // flat list of all loaded pages for select-all/filter
+
+function apiPost(endpoint, data) {
+  return fetch(endpoint, {
+    method: "POST",
+    headers: { "Authorization": "Bearer " + TOKEN, "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  }).then(function(r) { return r.json(); }).catch(function(e) { return { data: {} }; });
+}
+
+function loadSpaces() {
+  apiPost("/api/spaces", {}).then(function(result) {
+    var items = (result.data && result.data.items) || [];
+    var sel = document.getElementById("space-select");
+    sel.innerHTML = "";
+    for (var i = 0; i < items.length; i++) {
+      var opt = document.createElement("option");
+      opt.value = items[i].id;
+      opt.textContent = items[i].name;
+      sel.appendChild(opt);
+    }
+    if (items.length > 0) loadTree();
+  });
+}
+
+function loadTree() {
+  var spaceId = document.getElementById("space-select").value;
+  if (!spaceId) return;
+  allNodes = [];
+  selected.clear();
+  updateInfo();
+  document.getElementById("tree-wrap").innerHTML = '<div style="padding:16px;text-align:center;color:#909296;">Loading tree...</div>';
+
+  fetchSidebarPages(spaceId, null).then(function(roots) {
+    var container = document.createElement("div");
+    container.className = "tree";
+    renderNodes(container, roots, spaceId);
+    document.getElementById("tree-wrap").innerHTML = "";
+    document.getElementById("tree-wrap").appendChild(container);
+    document.getElementById("total-count").textContent = allNodes.length + " pages";
+  });
+}
+
+function fetchSidebarPages(spaceId, pageId) {
+  var payload = { spaceId: spaceId, limit: 100 };
+  if (pageId) payload.pageId = pageId;
+  return apiPost("/api/pages/sidebar-pages", payload).then(function(result) {
+    return (result.data && result.data.items) || [];
+  });
+}
+
+function renderNodes(container, pages, spaceId) {
+  for (var i = 0; i < pages.length; i++) {
+    var p = pages[i];
+    allNodes.push(p);
+
+    var nodeDiv = document.createElement("div");
+    nodeDiv.className = "tree-node";
+    nodeDiv.dataset.id = p.id;
+    nodeDiv.dataset.title = (p.title || "Untitled").toLowerCase();
+
+    // Arrow
+    var arrow = document.createElement("span");
+    arrow.className = "arrow" + (p.hasChildren ? "" : " empty");
+    arrow.textContent = "\u25B6";
+    nodeDiv.appendChild(arrow);
+
+    // Checkbox
+    var cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.className = "cb";
+    cb.dataset.id = p.id;
+    cb.addEventListener("change", (function(id, node) {
+      return function(e) {
+        e.stopPropagation();
+        if (this.checked) { selected.add(id); node.classList.add("selected"); }
+        else { selected.delete(id); node.classList.remove("selected"); }
+        updateInfo();
+      };
+    })(p.id, nodeDiv));
+    nodeDiv.appendChild(cb);
+
+    // Icon
+    var icon = document.createElement("span");
+    icon.className = "page-icon";
+    icon.textContent = p.icon || "\uD83D\uDCC4";
+    nodeDiv.appendChild(icon);
+
+    // Title
+    var title = document.createElement("span");
+    title.className = "title";
+    title.textContent = p.title || "Untitled";
+    nodeDiv.appendChild(title);
+
+    container.appendChild(nodeDiv);
+
+    // Children container (collapsed by default)
+    if (p.hasChildren) {
+      var childContainer = document.createElement("div");
+      childContainer.className = "tree-children collapsed";
+      childContainer.dataset.parentId = p.id;
+      childContainer.dataset.spaceId = spaceId;
+      childContainer.dataset.loaded = "false";
+      container.appendChild(childContainer);
+
+      // Click arrow to expand/collapse
+      (function(arrowEl, childEl, pageId, sId) {
+        arrowEl.style.cursor = "pointer";
+        arrowEl.addEventListener("click", function(e) {
+          e.stopPropagation();
+          if (childEl.classList.contains("collapsed")) {
+            childEl.classList.remove("collapsed");
+            arrowEl.classList.add("expanded");
+            if (childEl.dataset.loaded === "false") {
+              childEl.dataset.loaded = "true";
+              childEl.innerHTML = '<div style="padding:4px 8px;color:#666;font-size:12px;">Loading...</div>';
+              fetchSidebarPages(sId, pageId).then(function(children) {
+                childEl.innerHTML = "";
+                renderNodes(childEl, children, sId);
+                document.getElementById("total-count").textContent = allNodes.length + " pages";
+              });
+            }
+          } else {
+            childEl.classList.add("collapsed");
+            arrowEl.classList.remove("expanded");
+          }
+        });
+      })(arrow, childContainer, p.id, spaceId);
+    }
+  }
+}
+
+function filterTree() {
+  var filter = document.getElementById("filter").value.toLowerCase();
+  var nodes = document.querySelectorAll(".tree-node");
+  for (var i = 0; i < nodes.length; i++) {
+    var t = nodes[i].dataset.title;
+    nodes[i].style.display = (!filter || t.indexOf(filter) !== -1) ? "flex" : "none";
+  }
+}
+
+function selectAll() {
+  var filter = document.getElementById("filter").value.toLowerCase();
+  var nodes = document.querySelectorAll(".tree-node");
+  for (var i = 0; i < nodes.length; i++) {
+    var n = nodes[i];
+    if (n.style.display === "none") continue;
+    var id = n.dataset.id;
+    selected.add(id);
+    n.classList.add("selected");
+    var cb = n.querySelector(".cb");
+    if (cb) cb.checked = true;
+  }
+  updateInfo();
+}
+
+function selectNone() {
+  selected.clear();
+  var nodes = document.querySelectorAll(".tree-node");
+  for (var i = 0; i < nodes.length; i++) {
+    nodes[i].classList.remove("selected");
+    var cb = nodes[i].querySelector(".cb");
+    if (cb) cb.checked = false;
+  }
+  updateInfo();
+}
+
+function updateInfo() { document.getElementById("select-info").textContent = selected.size + " selected"; }
+
+function deleteSelected() {
+  if (selected.size === 0) { alert("No pages selected."); return; }
+  if (!confirm("Delete " + selected.size + " page(s)? This moves them to trash.")) return;
+  var ids = Array.from(selected);
+  var ok = 0, done = 0, total = ids.length;
+  for (var i = 0; i < ids.length; i++) {
+    (function(id) {
+      apiPost("/api/pages/delete", { pageId: id }).then(function(r) {
+        if (!r.error) ok++;
+        done++;
+        if (done === total) {
+          alert(ok + "/" + total + " pages deleted.");
+          selected.clear();
+          loadTree();
+        }
+      });
+    })(ids[i]);
+  }
+}
+
+loadSpaces();
+</script>
+</body>
+</html>

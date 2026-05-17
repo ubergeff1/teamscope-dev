@@ -1,9 +1,53 @@
+/**
+ * @file patch_slim_header.mjs
+ *
+ * @description
+ * Replaces the project sheet header (Ub component) with a slimmer, more
+ * information-dense layout. The original header used a `space-y-4` vertical
+ * stack with a color swatch, title, stats grid, and consultant breakdown in
+ * separate sections. This patch collapses everything into a compact two- or
+ * three-line layout:
+ *
+ *   **Line 1** -- Color dot, project title, status badge, client name,
+ *                 plus action buttons (Sync, Edit, Delete) on the right.
+ *
+ *   **Line 2** -- Inline stats: date range, deliverable/workshop counts,
+ *                 planned hours (split into deliv + ws), and editable
+ *                 budgeted hours.
+ *
+ *   **Line 3** (conditional) -- Per-consultant hour breakdown with colored
+ *                 dots, unassigned-hours warning, and remaining-budget
+ *                 indicator.
+ *
+ * Also adds two new computed values (`delivHrs`, `wsHrsTotal`) to break
+ * down planned hours into deliverable vs. workshop contributions.
+ *
+ * @components
+ *   - **Ub** (project sheet header)
+ *
+ * @strategy
+ *   Locates the display section by its opening `space-y-4` class and the
+ *   `const _i={not_started:` constant that immediately follows the Ub
+ *   function body. Slices out the entire display block and replaces it
+ *   with the new compact JSX. Then appends computed-value declarations
+ *   (`delivHrs`, `wsHrsTotal`) after the existing `assignedTotal` line.
+ */
+
 import { readFileSync, writeFileSync } from 'fs';
 
+/** Load the bundled JS for patching. */
 let c = readFileSync('/home/coder/teamscope_v3.js', 'utf8');
 
-// Find the exact display section to replace - from space-y-4 to the closing before const _i
+// ─── Locate the display section boundaries ───────────────────────────────────
+//
+// The display section starts with the `space-y-4` wrapper and ends just
+// before the `const _i={not_started:` status-color mapping. We capture
+// everything in between so we can replace it wholesale.
+
+/** Start of the display JSX inside Ub. */
 const displayStart = c.indexOf(`s.jsxs("div",{className:"space-y-4",children:[`);
+
+/** End anchor: the line break + closing before the _i status-color constant. */
 const displayEnd = c.indexOf(`\n  });\n}\nconst _i={not_started:`);
 
 if (displayStart < 0 || displayEnd < 0) {
@@ -11,18 +55,27 @@ if (displayStart < 0 || displayEnd < 0) {
   process.exit(1);
 }
 
-// displayEnd points to the \n before ]);}, we want to include up to and including the }
+// displayEnd points to the `\n` before `]);}`; we want to include up to
+// and including the closing `}` of the function body.
 const endSlice = displayEnd + `\n  });\n}`.length;
 
 console.log('Display from', displayStart, 'to', endSlice);
 
-// Need to compute delivHrs and wsHrs separately
-// Check if they're already computed - yes, totalHrs and wsHrs are computed in the component
-// totalHrs = deliverable flat+qa hours, wsHrs = workshop duration*consultants
-// But those are the totals. Let me check...
-// Actually looking at the code:
-// conHrs tracks per-consultant, but I need the simple sums
-// Let me add delivHrs and wsHrs computations
+// ─── New compact header JSX ──────────────────────────────────────────────────
+//
+// The replacement uses `space-y-2` for tighter vertical spacing. Key
+// sub-sections:
+//
+//   - Title row: color dot (3.5px circle), h1 title, status badge, client
+//     name, and action buttons (Sync with spinner, Edit, Delete).
+//
+//   - Stats row (pl-6 to align with title): date range with arrow, counts
+//     for deliverables and workshops, planned hours with a parenthetical
+//     breakdown (delivHrs + wsHrsTotal), and an inline-editable budget.
+//
+//   - Consultant row (conditional, pl-6): per-consultant hours with color
+//     dots, unassigned hours in orange, and a green/red remaining-budget
+//     indicator when budget > 0.
 
 const newDisplay = `s.jsxs("div",{className:"space-y-2",children:[
       s.jsxs("div",{className:"flex items-start gap-3",children:[
@@ -85,18 +138,30 @@ const newDisplay = `s.jsxs("div",{className:"space-y-2",children:[
   });
 }`;
 
+// Splice the new compact header into the bundle, replacing the old section.
 c = c.slice(0, displayStart) + newDisplay + c.slice(endSlice);
 
-// Now add delivHrs and wsHrsTotal computations to the component
-// They should go after the existing conHrs/unassigned calculations
+// ─── Add delivHrs and wsHrsTotal computations ────────────────────────────────
+//
+// The new header references `delivHrs` and `wsHrsTotal` to show the
+// breakdown of planned hours. These must be computed before the JSX return.
+// We insert them right after the existing `assignedTotal` declaration.
+
+/** Anchor: the line that computes assignedTotal from conHrs. */
 const insertAfter = `const assignedTotal=Object.values(conHrs).reduce((a,b)=>a+b,0);`;
 if (!c.includes(insertAfter)) { console.error('Cannot find assignedTotal'); process.exit(1); }
 
+/**
+ * `delivHrs` -- sum of `flat_hours` + `qa_hours` across all deliverables.
+ * `wsHrsTotal` -- sum of `duration_hours * consultant_count` across workshops.
+ */
 const addCalcs = `const assignedTotal=Object.values(conHrs).reduce((a,b)=>a+b,0);
   const delivHrs=(delivs||[]).reduce((a,d)=>a+(parseFloat(d.flat_hours||0))+(parseFloat(d.qa_hours||0)),0);
   const wsHrsTotal=(ws||[]).reduce((a,w)=>a+(parseFloat(w.duration_hours||0))*(w.consultants?w.consultants.length:0),0);`;
 
 c = c.replace(insertAfter, addCalcs);
+
+// ─── Write and verify ────────────────────────────────────────────────────────
 
 writeFileSync('/home/coder/teamscope_v3.js', c);
 

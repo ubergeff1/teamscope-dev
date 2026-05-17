@@ -1,0 +1,8 @@
+{
+	auto_https off
+}
+
+:443 {
+	tls /etc/ssl/homelab.crt /etc/ssl/homelab.key
+	reverse_proxy homarr:7575
+}

@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>DocMost - Batch Manager</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #1a1b1e; color: #c1c2c5; padding: 24px; }
+  h1 { font-size: 22px; margin-bottom: 8px; color: #fff; }
+  .subtitle { color: #909296; margin-bottom: 24px; font-size: 14px; }
+  .toolbar { display: flex; gap: 10px; margin-bottom: 16px; align-items: center; flex-wrap: wrap; }
+  input[type="text"] { padding: 8px 12px; border-radius: 4px; border: 1px solid #373A40; background: #25262b; color: #c1c2c5; font-size: 14px; width: 250px; }
+  button { padding: 8px 16px; border-radius: 4px; border: none; cursor: pointer; font-size: 13px; font-weight: 500; }
+  .btn-danger { background: #e03131; color: white; }
+  .btn-danger:hover { background: #c92a2a; }
+  .btn-secondary { background: #373A40; color: #c1c2c5; }
+  .btn-secondary:hover { background: #4a4e57; }
+  .btn-back { background: transparent; color: #4c6ef5; border: 1px solid #4c6ef5; text-decoration: none; display: inline-block; padding: 8px 16px; border-radius: 4px; font-size: 13px; }
+  .btn-back:hover { background: #4c6ef5; color: white; }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #2c2e33; }
+  th { background: #25262b; color: #909296; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; position: sticky; top: 0; }
+  tr:hover { background: #25262b; }
+  td { font-size: 14px; }
+  .cb { width: 16px; height: 16px; accent-color: #4c6ef5; cursor: pointer; }
+  .status { padding: 16px; text-align: center; color: #909296; }
+  .count { color: #909296; font-size: 13px; }
+  #select-info { margin-left: auto; font-size: 13px; color: #4c6ef5; font-weight: 500; }
+  .page-title { max-width: 500px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .page-id { font-family: monospace; font-size: 11px; color: #666; }
+</style>
+</head>
+<body>
+<div style="display:flex;align-items:center;gap:16px;margin-bottom:24px;">
+  <a href="/s/general" class="btn-back">&larr; Back</a>
+  <div>
+    <h1>Batch Page Manager</h1>
+    <div class="subtitle">Select pages to delete or manage in bulk</div>
+  </div>
+</div>
+
+<div class="toolbar">
+  <input type="text" id="filter" placeholder="Filter pages..." oninput="filterPages()">
+  <button class="btn-secondary" onclick="selectAll()">Select All</button>
+  <button class="btn-secondary" onclick="selectNone()">Select None</button>
+  <button class="btn-danger" onclick="deleteSelected()">Delete Selected</button>
+  <span id="select-info">0 selected</span>
+  <span class="count" id="total-count"></span>
+</div>
+
+<div id="table-wrap">
+  <div class="status">Loading pages...</div>
+</div>
+
+<script>
+var TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwMTllMzIxNi1lNTlmLTcxYTYtYjkzMy1hMzgwOTA0MTVlNjkiLCJhcGlLZXlJZCI6IjAxOWUzMjUxLWVhZmItNzc5Ni1iODJhLWE3ODhjMjA0ZmQyZCIsIndvcmtzcGFjZUlkIjoiMDE5ZTMyMTYtZTVhYS03MjNkLWExZDAtMzJlOTI0NTgyODZlIiwidHlwZSI6ImFwaV9rZXkiLCJpYXQiOjE3Nzg5NjA2ODksImV4cCI6MTgxMDQ5NjY4OCwiaXNzIjoiRG9jbW9zdCJ9.EltL74Q71LBOr-Xe0_ulKStVRuELj54XV8tYteF2-NU";
+var SPACE_ID = "019e3216-e5c9-721d-b249-3e261907b2bb";
+var allPages = [];
+var selected = new Set();
+
+function apiPost(endpoint, data) {
+  return fetch(endpoint, {
+    method: "POST",
+    headers: { "Authorization": "Bearer " + TOKEN, "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(data)
+  }).then(function(r) { return r.json(); });
+}
+
+function loadPages() {
+  allPages = [];
+  var cursor = null;
+  function fetchPage() {
+    var payload = { spaceId: SPACE_ID, limit: 100 };
+    if (cursor) payload.cursor = cursor;
+    apiPost("/api/pages/recent", payload).then(function(result) {
+      var data = result.data || {};
+      var items = data.items || [];
+      allPages = allPages.concat(items);
+      if (data.meta && data.meta.hasNextPage) {
+        cursor = data.meta.nextCursor;
+        fetchPage();
+      } else {
+        document.getElementById("total-count").textContent = allPages.length + " pages total";
+        renderTable();
+      }
+    });
+  }
+  fetchPage();
+}
+
+function renderTable() {
+  var filter = document.getElementById("filter").value.toLowerCase();
+  var filtered = allPages.filter(function(p) { return !filter || (p.title || "").toLowerCase().indexOf(filter) !== -1; });
+  var html = "<table><thead><tr><th style='width:40px'><input type='checkbox' class='cb' onchange='toggleAll(this)'></th><th>Title</th><th>ID</th></tr></thead><tbody>";
+  for (var i = 0; i < filtered.length; i++) {
+    var p = filtered[i];
+    var checked = selected.has(p.id) ? " checked" : "";
+    html += "<tr><td><input type='checkbox' class='cb' data-id='" + p.id + "'" + checked + " onchange='toggleOne(this)'></td>";
+    html += "<td class='page-title'>" + escHtml(p.title || "Untitled") + "</td>";
+    html += "<td class='page-id'>" + p.id + "</td></tr>";
+  }
+  html += "</tbody></table>";
+  document.getElementById("table-wrap").innerHTML = html;
+  updateInfo();
+}
+
+function escHtml(s) { return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+function toggleOne(cb) {
+  if (cb.checked) selected.add(cb.dataset.id);
+  else selected.delete(cb.dataset.id);
+  updateInfo();
+}
+
+function toggleAll(cb) {
+  var boxes = document.querySelectorAll("tbody .cb");
+  for (var i = 0; i < boxes.length; i++) {
+    boxes[i].checked = cb.checked;
+    if (cb.checked) selected.add(boxes[i].dataset.id);
+    else selected.delete(boxes[i].dataset.id);
+  }
+  updateInfo();
+}
+
+function selectAll() {
+  var filter = document.getElementById("filter").value.toLowerCase();
+  allPages.forEach(function(p) { if (!filter || (p.title || "").toLowerCase().indexOf(filter) !== -1) selected.add(p.id); });
+  renderTable();
+}
+
+function selectNone() { selected.clear(); renderTable(); }
+function filterPages() { renderTable(); }
+function updateInfo() { document.getElementById("select-info").textContent = selected.size + " selected"; }
+
+function deleteSelected() {
+  if (selected.size === 0) { alert("No pages selected."); return; }
+  if (!confirm("Delete " + selected.size + " page(s)? This moves them to trash.")) return;
+  var ids = Array.from(selected);
+  var ok = 0;
+  var done = 0;
+  ids.forEach(function(id) {
+    apiPost("/api/pages/delete", { pageId: id }).then(function(r) {
+      if (!r.error) ok++;
+      done++;
+      if (done === ids.length) {
+        alert(ok + "/" + ids.length + " pages deleted.");
+        selected.clear();
+        loadPages();
+      }
+    });
+  });
+}
+
+loadPages();
+</script>
+</body>
+</html>
